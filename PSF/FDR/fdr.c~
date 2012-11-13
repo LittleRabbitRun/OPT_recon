@@ -1,0 +1,505 @@
+/*****************************************************************************
+** FILE IDENTIFICATION
+**
+**      Name:       fdr.c (parts of this code is adapted from Jwalls original code libfdr2.c)
+**      Purpose:      slicewise functions for fdr filters
+**      Programmer:   L.B
+**      Date Started: Aug 2011
+**
+**  This is part of the OPT_RECON program
+**  
+**
+**  This program is free software; you can redistribute it and/or modify
+**  it under the terms of the GNU General Public License (version 2) as
+**  published by the Free Software Foundation.
+**
+**  This program is distributed in the hope that it will be useful,
+**  but WITHOUT ANY WARRANTY; without even the implied warranty of
+**  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+**  GNU General Public License for more details.
+******************************************************************************/
+
+#include "fdr.h"
+
+fdr_complex trilinear_interpolation(fdr_complex *psfdata, double x, double y, double z, 
+                                    double x0, double y0, double z0, 
+                                    double xstep, double ystep, double zstep, 
+                                    long psfn3, long psfn2, long psfn1)
+{
+  long px, py, pz;
+  double ux,uy,uz;
+  long xp = 1;
+  long yp = 1;
+  long zp = 1;
+  fdr_complex c000,c100,c010,c110,c001,c101,c011,c111;
+  fdr_complex c00,c10,c01,c11;
+  fdr_complex c20,c21,c22,c23;
+  fdr_complex c0,c1,c30,c31;
+  fdr_complex c,value;
+   
+  x = (x-x0)/xstep;
+  y = (y-y0)/ystep; 
+  z = (z-z0)/zstep; 
+
+  /* convert point to integer */// L 234
+  px = (long)floor(x);
+  py = (long)floor(y);
+  pz = (long)floor(z);
+
+  ux = x - px;
+  uy = y - py;
+  uz = z - pz;
+
+   /* return zero if out of bounds */
+  if (px < 0 || px >= (psfn1-1) || py < 0 || py >= (psfn2-1) || pz < 0 || pz >= (psfn3-1) ) 
+  {
+    return 0;
+  }
+
+  /* the eight pixels surrounding (x,y,z) */ 
+  c000 = (fdr_complex)psfdata[px + py*psfn1 + pz*psfn1*psfn2];
+  c100 = (fdr_complex)psfdata[(px + xp) + py*psfn1 + pz*psfn1*psfn2];
+
+  c010 = (fdr_complex)psfdata[px + (py + yp)*psfn1 + pz*psfn1*psfn2];
+  c110 = (fdr_complex)psfdata[(px + xp) + (py + yp)*psfn1 + pz*psfn1*psfn2];
+ 
+  c001 = (fdr_complex)psfdata[px + py*psfn1 + (pz+zp)*psfn1*psfn2];
+  c101 = (fdr_complex)psfdata[(px + xp) + py*psfn1 + (pz+zp)*psfn1*psfn2];
+
+  c011 = (fdr_complex)psfdata[px + (py + yp)*psfn1 + (pz+zp)*psfn1*psfn2];
+  c111 = (fdr_complex)psfdata[(px + xp) + (py + yp)*psfn1 + (pz+zp)*psfn1*psfn2];
+ 
+  // reduce to 2D problem
+  c00 = c100 - c000;
+  c01 = c101 - c001;
+  c10 = c110 - c010;
+  c11 = c111 - c011;
+   
+  c20 = c000 + ux*c00;
+  c21 = c001 + ux*c01;
+  c22 = c010 + ux*c10;
+  c23 = c011 + ux*c11;
+   
+  // reduce to 1D problem
+  c30 = c22 - c20;
+  c31 = c23 - c21;
+ 
+  c0 = c20 + uy*c30;
+  c1 = c21 + uy*c31;
+
+  // solve 1D problem
+  c = c1 - c0;
+  value = c0 + uz*c;
+  
+  return value;
+}
+
+int psf_in_fdr_filter(mihandle_t psffile, mihandle_t fdrfile, 
+                      long n3, long n2, long n1, 
+                      double step3, double step2, double step1,
+                      long psfn3, long psfn2,long psfn1, 
+                      double psfstep3, double psfstep2, double psfstep1, 
+                      double psfstart3, double psfstart2, double psfstart1) 
+{
+ 
+
+  unsigned long start[3], count[3];
+  long k,j,i, index;
+  float startk,stepk, startj,stepj, starti,stepi;
+  float FOVi, FOVj, FOVk;
+  double phi, rx, l, rz;
+  fdr_complex *psfdata, *fdrdata;
+  int result;
+  double rx_val0, rx_val1, l_val0,l_val1, rz_val0, rz_val1;
+  
+  /* coordinates for fft of sinograms 
+  note : steps(Z dimension) --> number of projection angles --> 2pi/sizes(3) -->angular dimension
+  Field of view = 1/step
+  start = -FOV/2 */
+
+  stepk = (2.0*M_PI)/n3;
+  FOVk = 1/stepk;  startk = -FOVk/2.0;  stepk=FOVk/n3;
+  FOVj = 1/step2;  startj = -FOVj/2.0;  stepj=FOVj/n2;
+  FOVi = 1/step1;  starti = -FOVi/2.0;  stepi=FOVi/n1;
+
+  fprintf(stdout, "coordinates for the FFT of the sinograms\n");
+  fprintf(stdout, "startz %6.4f stepz %6.4f  dimz %ld \n", startk, stepk, n3);
+  fprintf(stdout, "starty %6.4f stepy %6.4f  dimy %ld \n", startj, stepj, n2);
+  fprintf(stdout, "startx %6.4f stepx %6.4f  dimx %ld \n", starti, stepi, n1);
+   
+  /* Allocate memory */
+  fdrdata = (fdr_complex *)fftwf_malloc(n2*n1*sizeof(fdr_complex));
+  psfdata = (fdr_complex *)fftwf_malloc(psfn3*psfn2*psfn1*sizeof(fdr_complex));
+  
+  start[0] = start[1] = start[2] = 0;
+  count[0] = (unsigned long)psfn3; 
+  count[1] = (unsigned long)psfn2; 
+  count[2] = (unsigned long)psfn1;
+  result = miget_voxel_value_hyperslab(psffile, MI_TYPE_FCOMPLEX, start, count, (fdr_complex *)psfdata);
+  
+  if(result == MI_ERROR)
+  {
+   fprintf(stdout, "Could not load the entire PSF file\n");
+   fftwf_free(psfdata); 
+   fftwf_free(fdrdata);
+   return 1;
+  }
+     
+  for(k=0;k<n3;k++) 
+  {
+   l_val0 = psfstart3;
+   l_val1 = l_val0+psfstep3;
+   for(j=0;j<n2;j++) 
+   {	
+    rx_val0 = psfstart2/(psfstep2*psfn2);
+    rx_val1 = (psfstart2+1)/(psfstep2*psfn2);
+    
+    for(i=0;i<n1;i++) 
+    {
+     rz_val0 = psfstart1/(psfstep1*psfn1);
+     rz_val1 = (psfstart1+1)/(psfstep1*psfn1);
+     
+     index = j*n1+i;                    
+     phi = startk + k*stepk;
+     rx  = startj + j*stepj;
+     rz = starti + i*stepi;
+      
+     if(fabs(rx)> 1e-9)
+     {
+      l = -phi/rx; //convert slope to depth
+      fdrdata[index] = trilinear_interpolation(psfdata,rz,rx,l,rz_val0,rx_val0,l_val0,rz_val1-rz_val0,rx_val1-rx_val0,l_val1-l_val0,psfn3,psfn2,psfn1);
+     }
+     else
+     {
+      fdrdata[index] = (fdr_complex)0.0;
+     }           
+    }
+   }
+     
+  start[0] = (unsigned long)k;
+  start[1] = start[2] = 0;
+  count[0] = 1;
+  count[1] = (unsigned long)n2; 
+  count[2] = (unsigned long)n1;
+    
+  result = miset_voxel_value_hyperslab(fdrfile,MI_TYPE_FCOMPLEX,start,count, 
+                                               (mifcomplex_t *)fdrdata);
+  if(result == MI_ERROR) 
+  {
+   fprintf(stderr, "Error writing data at z=%ld.\n", k);
+   return 1;
+  }
+  }
+  printf("psf in fdr space filter COMPLETE!\n");
+  
+  return 0;
+}
+
+int deconvolution_in_fdr_space_filter(mihandle_t fdrfile, mihandle_t deconvfile, long n3, long n2, long n1) 
+{
+  long k,i;
+  unsigned long start[3], count[3];
+  int result;
+  double dmax=0;
+  float tmp,n;
+  float const_value=0.5; // allow user to change this later
+  fdr_complex tmpv;
+  fdr_complex *fdrdata, *deconvdata;
+
+  fdrdata = (fdr_complex *)fftwf_malloc(n3*n2*n1*sizeof(fdr_complex));
+    
+  start[0] = start[1] = start[2] = 0;
+  count[0] = (unsigned long) n3;
+  count[1] = (unsigned long) n2; 
+  count[2] = (unsigned long) n1;
+  result = miget_voxel_value_hyperslab(fdrfile,MI_TYPE_FCOMPLEX,start,count,(fdr_complex *) fdrdata);
+  if(result == MI_ERROR)
+  {
+   fprintf(stdout, "Could not load the entire FDR file\n");
+   fftwf_free(fdrdata); 
+   return 1;
+  }
+  for(i=0; i< n3*n2*n1; i++)
+  {
+   tmp = sqrt(creal(fdrdata[i])*creal(fdrdata[i])+cimag(fdrdata[i])*cimag(fdrdata[i]));
+   if (isinf(tmp))
+     tmp =0;
+   if (tmp > dmax)
+     dmax = tmp;
+  }
+  fftwf_free(fdrdata);  
+  fdrdata = (fdr_complex *)fftwf_malloc(n2*n1*sizeof(fdr_complex));
+  deconvdata = (fdr_complex *)fftwf_malloc(n2*n1*sizeof(fdr_complex));
+  n = dmax * const_value;
+  for(k=0;k<n3;k++)
+  {
+   start[0] = (unsigned long)k;
+   start[1] = start[2] = 0;
+   count[0] = 1;
+   count[1] = (unsigned long) n2; count[2] = (unsigned long)n1;
+   result = miget_voxel_value_hyperslab(fdrfile,MI_TYPE_FCOMPLEX,start,count,(fdr_complex *) fdrdata);
+   if(result == MI_ERROR)
+   {
+   fprintf(stdout, "Could not load the entire FDR file\n");
+   fftwf_free(fdrdata); 
+   fftwf_free(deconvdata);
+   return 1;
+   }
+   for(i=0;i<n2*n1;i++)
+   {
+    tmpv = fdrdata[i];
+    // attempting to calculate this in one shot
+    // h*/(abs(h)+n**2)
+    tmp  = fabs(creal(tmpv)*creal(tmpv)+cimag(tmpv)*cimag(tmpv)); // sqrt*sqrt-->tmp
+    deconvdata[i] = (creal(tmpv)+(-1*cimag(tmpv)*I))/(tmp+n*n);
+   }
+   result = miset_voxel_value_hyperslab(deconvfile,MI_TYPE_FCOMPLEX,start,count,(fdr_complex *)deconvdata);
+   if(result == MI_ERROR)
+   {
+    fprintf(stdout, "Could not load the entire FDR file\n");
+    fftwf_free(fdrdata); 
+    fftwf_free(deconvdata);
+    return 1;
+   }
+   
+   }
+   fftwf_free(fdrdata); 
+   fftwf_free(deconvdata);
+
+   printf("deconvolution in fdr space filter COMPLETE!\n");
+
+  return 0;
+}
+
+int rolloff_filter(mihandle_t inputfile, double weight, double maxslope,
+                   long n3, long n2, long n1, double step2, double step1) 
+{
+  
+  unsigned int i,j,k,index;
+  unsigned long start[3], count[3];
+  float startk,startj,starti,stepk,stepj,stepi,slope;
+  float FOVi, FOVj, FOVk;
+  float *rolloff_filter;
+  int result;
+  double phi, rx, l;
+ 
+  /* First build the 2D rolloff filter at each y-step */
+  /* We then iterate over all y and copy the data in place */
+  stepk = (2.0*M_PI)/n3;
+  FOVk = 1/stepk;  startk = -FOVk/2.0;  stepk=FOVk/n3;
+  FOVj = 1/step2;  startj = -FOVj/2.0;  stepj=FOVj/n2;
+  FOVi = 1/step1;  starti = -FOVi/2.0;  stepi=FOVi/n1;
+  fprintf(stdout, "coordinates for the FFT of the sinograms\n");
+  fprintf(stdout, "startz %6.4f stepz %6.4f  dimz %ld \n", startk, stepk, n3);
+  fprintf(stdout, "starty %6.4f stepy %6.4f  dimy %ld \n", startj, stepj, n2);
+  fprintf(stdout, "startx %6.4f stepx %6.4f  dimx %ld \n", starti, stepi, n1);
+  
+  /* Allocate memory for the 2D rolloff filter */
+  rolloff_filter = (float *)fftwf_malloc(n3*n1*sizeof(float)); 
+
+  for(k=0;k<n3;k++) 
+  {
+   for(i=0;i<n1;i++) 
+    {
+     index = k*n1 + i;
+     phi = startk + k*stepk;
+     rx  = starti + i*stepi;
+     if(fabs(rx)> 1e-9)  
+      {
+       l = phi/rx; //convert slope to depth ( we might need to change the sign)
+   
+       if (l <= 0)
+	 {
+	 rolloff_filter[index] = 1.0;
+         }
+       else if ( l < weight)
+         {
+         rolloff_filter[index] = pow(cos(M_PI/2.0*fabs(l)/weight),2);
+         }
+       else
+	 {
+         rolloff_filter[index] = 0.0;
+	 }
+     
+      }
+     else
+       {
+         rolloff_filter[index] = 0.0;
+       }
+    
+    }
+  }
+    /* Iterate over each y-step, setting the values then writing them out to file */
+  for(j=0;j<n2;j++) 
+  {
+   start[0] = 0; start[2] = 0; 
+   start[1] = (unsigned long)j;
+   count[0] = (unsigned long)n3;
+   count[1] = 1;
+   count[2] = (unsigned long)n1;
+    
+   result = miset_voxel_value_hyperslab(inputfile,MI_TYPE_FLOAT,start,count,(float *)rolloff_filter);
+   if(result == MI_ERROR)
+   {
+    fprintf(stderr, "Error in setting values.\n");
+    fftwf_free(rolloff_filter);
+    return 1;
+   }
+       
+   }
+   fftwf_free(rolloff_filter);
+   result = miset_volume_valid_range(inputfile, 1.0,0.0);
+   if(result == MI_ERROR)
+   {
+    fprintf(stderr, "Could not set volume range\n");
+    return 1;
+   } 
+
+   printf("rolloff filter COMPLETE!\n");
+
+   return 0;
+
+}
+int bandlimit_filter(mihandle_t inputfile, double bandlimit, long n3, long n2, long n1,double step2, double step1)
+{
+ 
+ unsigned int i,j,k,index;
+ unsigned long start[3], count[3];
+ float startk,startj,starti,stepk,stepj,stepi,slope;
+ float FOVi, FOVj, FOVk;
+ float *bw_filter,bw_i, bw_j;
+ int result;
+ double rx, ry;
+
+ /*coordinates for fft of sinograms 
+  note : steps(k) # of projection angles --> 2pi/sizes(k)
+  Field of view = 1/step
+  start = -FOV/2
+  step = FOV/size */
+ stepk = (2.0*M_PI)/n3;
+ FOVk = 1/stepk;  startk = -FOVk/2.0;  stepk=FOVk/n3;
+ FOVj = 1/step2;  startj = -FOVj/2.0;  stepj=FOVj/n2;
+ FOVi = 1/step1;  starti = -FOVi/2.0;  stepi=FOVi/n1;
+ fprintf(stdout, "coordinates for the FFT of the sinograms\n");
+ fprintf(stdout, "startz %6.4f stepz %6.4f  dimz %ld \n", startk, stepk, n3);
+ fprintf(stdout, "starty %6.4f stepy %6.4f  dimy %ld \n", startj, stepj, n2);
+ fprintf(stdout, "startx %6.4f stepx %6.4f  dimx %ld \n", starti, stepi, n1);
+
+ /* Allocate memory for the 2D bw filter */
+ bw_filter = (float *)fftwf_malloc(n2*n1*sizeof(float)); 
+
+ // Find the right bandlimits
+ bw_i = bandlimit*(n1-1)/4500;
+ bw_j = bandlimit*(n2-1)/4500;
+  
+ for(k=0;k<n3;k++) 
+ {
+  for(j=0;j<n2;j++) 
+  {
+   for(i=0;i<n1;i++) 
+   {
+    
+    index = j*n1 + i;
+    ry = startj + j*stepj; 
+    rx = starti + i*stepi;
+    if ( fabs(rx) > bw_i || fabs(ry) > bw_j )
+      {
+	bw_filter[index] = 0.0;
+      }
+    else if ( fabs(rx) < 0.9*bw_i && fabs(ry) < 0.9*bw_j)
+      {
+        bw_filter[index] = 1.0;
+      }
+    else if (( fabs(rx) >= 0.9*bw_i && fabs(rx) <= bw_i) &&  (fabs(ry) >= 0.9*bw_j && fabs(ry) <= bw_j) )
+      {
+        bw_filter[index] = pow(cos(M_PI/2.0*(fabs(rx)-0.9*bw_i)/(0.1*bw_i)),2)*
+	                pow(cos(M_PI/2.0 *(fabs(ry)-0.9*bw_j)/(0.1*bw_j)),2);
+      } 
+    else if(fabs(rx) >= 0.9*bw_i && fabs(rx) <= bw_i) 
+    {
+        bw_filter[index] = pow(cos(M_PI/2.0 * (fabs(rx)-0.9*bw_i)/(0.1*bw_i)),2);
+    }
+    else if(fabs(ry) >= 0.9*bw_j && fabs(ry) <= bw_j) 
+    {
+      bw_filter[index] = pow(cos(M_PI/2.0*(fabs(ry)-0.9*bw_j)/(0.1*bw_j)),2);
+    }
+   }
+  } 
+    
+  start[0] = (unsigned long)k; start[1] = start[2] = 0;
+  count[0] = 1; 
+  count[1] = (unsigned long)n2;
+  count[2] = (unsigned long)n1;
+    
+  // Write out the 2D data to file
+  result = miset_voxel_value_hyperslab(inputfile,MI_TYPE_FLOAT,start,count,(float *)bw_filter);
+  if(result == MI_ERROR)
+   {
+    fprintf(stderr, "Error in setting values.\n");
+    fftwf_free(bw_filter);
+    return 1;
+   }
+  }
+  fftwf_free(bw_filter);
+
+  result = miset_volume_valid_range(inputfile, 1.0,0.0);
+  if(result == MI_ERROR)
+  {
+    fprintf(stderr, "Could not set volume range\n");
+    return 1;
+  }
+
+ printf("bandlimit filter COMPLETE!\n");
+ return 0;
+}
+    
+int limit_recovery_filter(mihandle_t inputfile, mihandle_t outputfile, double fdrlimit, long n3, long n2, long n1) 
+{
+ unsigned int k,i;
+ float val1, val2;
+ int result;
+ unsigned long count[3], start[3];
+ fdr_complex *limit_recovery;
+ 
+ limit_recovery = (fdr_complex *)fftw_malloc(n2*n1*sizeof(fdr_complex));
+    
+
+ for(k=0;k<n3;k++)
+ {
+  start[0] = (unsigned long)k;
+  start[1] = start[2] = 0;
+  count[0] = 1;
+  count[1] = (unsigned long)n2; 
+  count[2] = (unsigned long)n1;
+  result = miget_voxel_value_hyperslab(inputfile, MI_TYPE_FCOMPLEX, start,count, (fdr_complex *)limit_recovery);
+  if(result == MI_ERROR)
+  {
+   fprintf(stdout, "Could not retrieve data from the file\n");
+   fftwf_free(limit_recovery);
+   return 1;
+  }
+    
+  for(i=0;i<n2*n1;i++) 
+  {
+   val1 = fabs(limit_recovery[i]);
+   if(val1 > fdrlimit/2) 
+   {
+    val2 = fdrlimit - fdrlimit/2*exp(-(val1-fdrlimit/2)/fdrlimit);
+    limit_recovery[i] *= val2/val1;
+   }
+   
+  }
+  
+  result = miset_voxel_value_hyperslab(outputfile, MI_TYPE_FCOMPLEX, 
+                                       start, count, (mifcomplex_t *)limit_recovery);
+  if(result == MI_ERROR)
+  {
+   fprintf(stdout, "Could not set data in the file\n");
+   fftwf_free(limit_recovery);
+   return 1;
+  } 
+  }
+  fftwf_free(limit_recovery);
+  printf("limit recovery filter COMPLETE!\n");
+  return 0;
+}  

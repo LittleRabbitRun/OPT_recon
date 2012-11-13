@@ -1,0 +1,35 @@
+#include "useMINC2.h"
+#include "fdr.h"
+
+int main(int argc, char *argv[]) 
+{
+
+ int result;
+ long n3,n2,n1;
+ mihandle_t psffile, psffft;
+  
+
+ if(argc!=3) 
+ {
+  fprintf(stderr, "Usage: input PSF and output files!\n");
+  return 1;
+ }
+
+ result = open_minc_file_and_read(argv[1], &psffile);
+ if(!result) { return 1; }
+  
+ result = get_minc_spatial_dimensions_from_handle(psffile, &n3, &n2, &n1);
+ if(!result) { return 1; }
+ 
+ result = open_minc_file_and_write(argv[2], &psffft, n3, n2, n1, COMPLEX);
+ if(!result) { return 1; }
+   
+ result = slicewise_psfstack_fft(psffile, psffft);
+ if(!result) { return 1; }
+
+  miclose_volume(psffile);
+  miclose_volume(psffft);
+ 
+ return 0;
+
+}

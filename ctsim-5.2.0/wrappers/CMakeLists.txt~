@@ -1,0 +1,45 @@
+
+MARK_AS_ADVANCED(USE_BOOST)
+OPTION(USE_BOOST "Use boost with c++" ON)
+IF(USE_BOOST)
+  SET(Boost_ADDITIONAL_VERSIONS "1.47" "1.47.0")
+  FIND_PACKAGE(Boost 1.47.0 COMPONENTS python)
+ENDIF(USE_BOOST)
+
+
+INCLUDE_DIRECTORIES(
+${Boost_INCLUDE_DIRS}
+/usr/include/python2.6
+${ctsim_SOURCE_DIR}/include/
+)
+
+LINK_DIRECTORIES(${Boost_LIBRARY_DIRS}
+${ctsim_SOURCE_DIR}/libctsim
+${ctsim_SOURCE_DIR}/libctsupport)
+
+SET(IMAGE_SRC
+${ctsim_SOURCE_DIR}/wrappers/imagefile_wrap.cpp)
+
+SET(PROJECTIONS_SRC
+${ctsim_SOURCE_DIR}/wrappers/projections_wrap.cpp
+)
+IF(PNG_FOUND)
+  INCLUDE_DIRECTORIES(${PNG_INCLUDE_DIRS})
+  ADD_DEFINITIONS(${PNG_DEFINITIONS})
+ENDIF(PNG_FOUND)
+
+IF(FFTW3_FOUND)
+  INCLUDE_DIRECTORIES(${FFTW3_INCLUDE_DIRS})
+ENDIF(FFTW3_FOUND)
+SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+ADD_LIBRARY(imagefile SHARED ${IMAGE_SRC})
+
+TARGET_LINK_LIBRARIES(imagefile boost_python python2.6 ctsupport ctsim ${PNG_LIBRARIES} ${FFTW3_LIBRARIES} z)
+
+ADD_LIBRARY(projections SHARED ${PROJECTIONS_SRC})
+
+TARGET_LINK_LIBRARIES(projections boost_python python2.6 ctsupport ctsim ${PNG_LIBRARIES} ${FFTW3_LIBRARIES}  z)
+
+SET (CMAKE_LIBRARY_OUTPUT_DIRECTORY
+     ${ctsim_BINARY_DIR}/lib CACHE PATH "Single Directory for all Executables.")

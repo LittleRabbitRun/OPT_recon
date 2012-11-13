@@ -1,0 +1,242 @@
+#!/usr/bin/env python
+# L.B Sept 2011
+# modified the original pmincaverage.py (JP Lerch) to use
+# multiprocessing with rows instead of slices (projections), 
+# note CCD coefficients is 2 dimensional with zspace 1
+import os
+from sys import argv
+from pyminc.volumes.factory import *
+from numpy import *
+from optparse import OptionParser
+import multiprocessing as mp
+import string
+from time import time, ctime
+from OPT_recon.masterConfig import *
+program_name = 'opt_applyccdcoeffs.py'
+volhandles = []
+def sorted_nicely( l ): 
+    """ Sort the given iterable in the way that humans expect.""" 
+    convert = lambda text: int(text) if text.isdigit() else text 
+    alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ] 
+    return sorted(l, key = alphanum_key)
+
+def getcoeffs(filename):
+    searchpaths = os.environ['PATH'].split(os.pathsep)
+    # append any custom directories to the paths
+    searchpaths.append(os.getcwd())
+    for p in searchpaths:
+        coeff_path = os.path.join(p, filename)
+        # now figure out which path contains the coeff we are looking for
+        if os.path.isfile(coeff_path):
+           return coeff_path 
+
+def getslice(volhandle, slice, q,nslices):
+    """collects hyperslabs for a particular volume handle. Designed to
+    be used with the multiprocessing module"""
+    if volhandles[0].ndims == 3: #3D file
+        t = volhandles[volhandle].getHyperslab((slice,0,0),
+                                               (nslices,volhandles[0].sizes[1],
+                                                volhandles[0].sizes[2]))
+        t.shape = (nslices,volhandles[0].sizes[1], volhandles[0].sizes[2])
+    elif volhandles[0].ndims == 4: #4D vector file
+        t = volhandles[volhandle].getHyperslab((0, slice,0,0),
+                                               (volhandles[0].sizes[0],
+                                                nslices,
+                                                volhandles[0].sizes[2],
+                                                volhandles[0].sizes[3]))
+        t.shape = (volhandles[0].sizes[0],
+                   nslices,
+                   volhandles[0].sizes[2],
+                   volhandles[0].sizes[3])
+    q.put((volhandle, t))
+
+
+def getfile(q, filename):
+    q.put(volumeFromFile(filename, dtype='short'))
+  
+def process_options(infile = None, outfile = None, 
+                       coeffa = None, coeffb = None, coeffc = None, 
+                       path = None):
+    filea='../share/OPT_recon/coeffa.mnc'
+    fileb='../share/OPT_recon/coeffb.mnc'
+    filec='../share/OPT_recon/coeffc.mnc'
+    coefa='' 
+    coefb='' 
+    coefc='' 
+    
+    if not coeffa:
+       coefa = getcoeffs(filea)
+       if not coefa:
+       	  raise IOError,"Abort! can not find the coefficient a"
+    else:
+       coefa = coeffa
+
+    if not coeffb:
+       coefb = getcoeffs(fileb)
+       if not coefb:
+       	  raise IOError,"Abort! can not find the coefficient b"
+    else:
+       coefb = coeffb
+
+    if not coeffc:
+       coefc = getcoeffs(filec)
+       if not coefc:
+       	  raise IOError,"Abort! can not find the coefficient c"
+    else:
+       coefc = coeffc  
+    #get filename and path separeted 
+    p1 = os.path.dirname(infile)
+    p2 = os.path.dirname(outfile)
+
+    if not p1:
+       path=makeDir(path)
+       infile=path+infile
+    if not p2:
+       path=makeDir(path)
+       outfile=path+outfile
+
+    coeffhandles = []
+    #first append the three coefficients
+    coeffhandles.append(volumeFromFile(coefa, dtype='short'))
+    coeffhandles.append(volumeFromFile(coefb, dtype='short'))
+    coeffhandles.append(volumeFromFile(coefc, dtype='short'))
+    
+    # open all the file handles
+    nfiles = 1
+    for i in range( nfiles ):
+        #print("VOLHANDLES: %d" % i)
+        #print("Processing Projections")
+        print infile
+        volhandles.append(volumeFromFile(infile, dtype='float'))
+        
+    #outfile_h = volumeLikeFile(infile,outfile, volumeType='float')
+    outfile_h = volumeFromInstance(volhandles[0],outfile, volumeType='float', path='/OPT')  
+    history1= volhandles[0].getHistory(3000)
+    history2= ctime(time()) + string.join(argv)
+    history= history1.value+history2 + " CCD calibration of file " + infile +" created using a second order polynomial with coefficients " + coefa + " " + coefb + " " + coefc+'\n';
+
+    outfile_h.addHistory(len(history),history)
+    
+    col = (coeffhandles[0].sizes[2] - volhandles[0].sizes[2])/2
+    row = (coeffhandles[0].sizes[1] - volhandles[0].sizes[1])/2
+
+    nslices = 10
+
+    if volhandles[0].ndims == 3:
+        sliceIndex = 0
+        sliceArray = zeros( (nfiles,nslices,
+                             volhandles[0].sizes[1],
+                             volhandles[0].sizes[2]))
+    elif volhandles[0].ndims == 4:
+        sliceIndex = 1
+        sliceArray = zeros( (nfiles,
+                             volhandles[0].sizes[0],
+                             nslices,
+                             volhandles[0].sizes[2],
+                             volhandles[0].sizes[3]))
+    a = coeffhandles[0].getHyperslab((0,row,col),(1,volhandles[0].sizes[1],volhandles[0].sizes[2]))
+    a.shape = (1, volhandles[0].sizes[1],volhandles[0].sizes[2])
+    b = coeffhandles[1].getHyperslab((0,row,col),(1,volhandles[0].sizes[1],volhandles[0].sizes[2]))
+    b.shape = (1, volhandles[0].sizes[1],volhandles[0].sizes[2])
+    c0 = coeffhandles[2].getHyperslab((0,row,col),(1,volhandles[0].sizes[1],volhandles[0].sizes[2]))
+    c0.shape = (1, volhandles[0].sizes[1],volhandles[0].sizes[2])
+    
+
+    # loop over all rows
+    p = mp.Pool(processes=2)
+    manager = mp.Manager()
+    for i in range(0,volhandles[0].sizes[sliceIndex],nslices):
+        # last set might have less than n-slices - adjust.
+        if (i + nslices) > volhandles[0].sizes[sliceIndex]:
+            nslices = volhandles[0].sizes[sliceIndex] - i
+            if volhandles[0].ndims == 3:
+                sliceArray = zeros( (nfiles,nslices,
+                                     volhandles[0].sizes[1],
+                                     volhandles[0].sizes[2]))
+            elif volhandles[0].ndims == 4:
+                sliceArray = zeros( (nfiles,
+                                     volhandles[0].sizes[0],
+                                     nslices,
+                                     volhandles[0].sizes[2],
+                                     volhandles[0].sizes[3]))
+                           
+    
+        
+        print "Processing 10 projections starting at: %i" % i
+        # use parallel processing to get the row data
+        q = manager.Queue()
+        for j in range(nfiles):
+            t = p.apply_async(getslice, (j,i,q,nslices))
+
+        t.get() # seems to be necessary as a sort of waitpid call ...
+
+        # retrieve the data from the queue
+        while not q.empty():
+            ix, t = q.get()
+            if volhandles[0].ndims == 3:
+                sliceArray[ix,::,::,::] = t
+            elif volhandles[0].ndims == 4:
+                sliceArray[ix,::,::,::,::] = t
+	for k in range(nslices): 
+	    if volhandles[0].ndims == 3:
+                sl = sliceArray[::,k,::,::]
+                #outfile.data[i+k::] = sl
+                #print sl.shape
+                c=subtract(c0,sl)
+                #print c
+                c1_0 = subtract(multiply(b,b),multiply(4,multiply(a,c)))
+                if (c1_0 < 0).any():
+                   c1_0 = abs(c1_0)
+                c1 =sqrt(c1_0)
+                c1_1 = add(multiply(b,-1),c1)
+                c1_2 = divide(1.,multiply(a,2))
+                c2 = multiply(c1_1,c1_2)
+                #print c2
+                outfile_h.data[i+k::] = c2
+
+            elif volhandles[0].ndims == 4:
+                # need to figure out how to correct a 4d image later
+                for vi in range(volhandles[0].sizes[0]):
+                    sl = sliceArray[::,vi,k,::,::]
+                    outfile_h.data[vi,i+k,::,::] = sl 
+    # and Bob's your uncle.
+    for p in range(3):
+	coeffhandles[p].closeVolume()
+    volhandles[0].closeVolume()
+    outfile_h.writeFile()
+    outfile_h.closeVolume()
+
+if __name__ == "__main__":
+
+    usage = "Usage: "+program_name+" [options--> coefficents files] input.mnc output.mnc"+\
+            "   or  "+program_name+" --help";
+    description = "Solves the quadratic formula for ax^2+bx+c=qfi where qfi is the aquired image and a , b, c are coefficients calculated from the BrightField images and provided to this program."
+    
+   
+    parser = OptionParser(usage=usage, description=description)
+    parser.add_option("--clobber",action="store_true", dest="clobber",
+                       default=0, help="overwriting output file(s)")
+    parser.add_option("--coeffA", "-a", action="store", type="string",                     		      dest="coeffa", metavar="FILE",
+           	       help="provide coefficient image (a)x^2+bx+c=q ")
+    parser.add_option("--coeffB", "-b", action="store", type="string",                      		      dest="coeffb", metavar="FILE",
+                       help="provide coefficient image ax^2+(b)x+c=q ")
+    parser.add_option("--coeffC", "-c", action="store", type="string",                                        dest="coeffc", metavar="FILE",
+	               help="provide coefficient image ax^2+bx+(c)=q ")
+    parser.add_option("--path", "-p", action="store", type="string",                                        dest="path",
+	               default=0, help="create image using the specified path")
+    (options, args) = parser.parse_args()
+    
+    if (len(args) < 2):
+        parser.error("Abort! Incorrect number of arguments")
+    
+    if not options.clobber and os.path.exists(args[-1]):
+        raise SystemExit, \
+              "The --clobber option is needed to overwrite an existing file."
+    
+    infile, outfile = args
+    
+    process_options(infile, outfile,
+                    options.coeffa,options.coeffb,options.coeffc,options.path)
+
+                                                          
+    

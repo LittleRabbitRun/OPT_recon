@@ -1,0 +1,208 @@
+#include <filehandle.h>
+bool cmdOptionExists(char** begin, char** end, const string& option)
+{
+    return find(begin, end, option) != end;
+}
+char* getCmdOption(char ** begin, char ** end, const string & option)
+{
+    char ** itr = find(begin, end, option);
+    if (itr != end && ++itr != end)
+    {
+        return *itr;
+    }
+    return 0;
+}
+
+bool compareFileNamesNumeric(const string& s1, const string& s2)
+{
+  unsigned int n1 = s1.length();
+  unsigned int n2 = s2.length();
+  
+  // compare the strings numerically
+  unsigned int i1 = 0;
+  unsigned int i2 = 0;
+  
+  while (i1 < n1 && i2 < n2)
+    {
+    char c1 = s1[i1++];
+    char c2 = s2[i2++];
+
+    if ((c1 >= '0' && c1 <= '9') && (c2 >= '0' && c2 <= '9'))
+      {
+      // convert decimal numeric sequence into an integer
+      unsigned int j1 = 0;
+      while (c1 >= '0' && c1 <= '9')
+        {
+        j1 = (j1 << 3) + (j1 << 1) + (c1 - '0');
+        if (i1 == n1)
+          {
+          break;
+          }
+        c1 = s1[i1++];
+        }
+    
+      // convert decimal numeric sequence into an integer
+      unsigned int j2 = 0;
+      while (c2 >= '0' && c2 <= '9')
+        {
+        j2 = (j2 << 3) + (j2 << 1) + (c2 - '0');
+        if (i2 == n2)
+          {
+          break;
+          }
+        c2 = s2[i2++];
+        }
+
+      // perform the numeric comparison
+      if (j1 < j2)
+        {
+        return 1;
+        }
+      if (j1 > j2)
+        {
+        return 0;
+        }
+      }
+
+    // case-insensitive lexicographic comparison of non-digits
+    if ((c1 < '0' || c1 > '9') || (c2 < '0' || c2 > '9'))
+      {
+      if (c1 < c2)
+        {
+        return 1;
+        }
+      if (c1 > c2)
+        {
+        return 0;
+        }
+      }
+    }
+  
+  // if it is a tie, then the shorter string is "less"
+  if ((n1 - i1) < (n2 - i2))
+    {
+    return 1;
+    }
+
+  // if strings are otherwise equal, fall back to default to break tie 
+  if ((i1 == n1) && (i2 == n2))
+    {
+    return (s1 < s2);
+    }
+
+  // otherwise, return false
+  return 0;
+}
+bool getFilenameWithoutExtension(string path)
+{
+  size_t found;
+  found = path.find('.');
+  if (found==string::npos)
+    return 1;
+
+  return 0;
+}
+string ExtractDirectory(string path)
+{
+  return path.substr( 0, path.find_last_of( "/" ) +1);
+}
+string ExtractFileName(string path)
+{
+  return path.substr( path.find_last_of( "/" ) +1);
+}
+string getExtension(string path)
+{
+  return path.substr(path.find_last_of(".") +1);
+}
+string getPrefix(string path)
+{
+  return path.substr(0,path.find_first_of("_") +1);
+}
+// List files in directory
+int getDir (string dir, vector<string> &files, vector<string> &darkfiles, string &logfile)                                   
+{
+  DIR *dp;
+  struct dirent *dirp;
+  string path, filename1, filename2;
+  if((dp  = opendir(dir.c_str())) == NULL) {
+    cout << "Error accessing directory " << dir << endl;
+    return 1;
+  }
+  //cout << path << endl;
+  while ((dirp = readdir(dp)) != NULL) {
+    path = string(dirp->d_name);
+    
+    if(getExtension(path)=="bin")
+      {
+      if(getPrefix(path)=="dark_")
+        darkfiles.push_back(path);
+      else
+        {
+	  if (!files.empty())
+	   {
+	   if(getPrefix(files.back()) == getPrefix(path))
+             {
+             files.push_back(path);
+	     }
+           else
+             {
+             cout << "Error found mismatched .bin(s), remove the ones which are not part of the scan!" << endl;
+             return 1;
+	     }
+	   }
+	  else
+	    {
+            files.push_back(path);
+	    }
+        }
+      }
+    if(getExtension(path)=="log")
+      {
+      logfile.assign(path);
+      }
+
+  }
+  if (logfile.empty())
+   {
+     
+    filename1 = files.front();
+    filename2 = files.back();
+    
+    while (!filename1.empty() && !filename2.empty())
+      {
+       filename1 =  filename1.substr(0,filename1.find_last_of("_"));
+       filename2 =  filename2.substr(0,filename2.find_last_of("_"));
+        
+       if (filename1.compare(filename2)==0)
+	{
+	 filename1.append("_");
+         logfile.assign(filename1);
+         filename1.clear();
+         filename2.clear();
+	}
+      }
+   }
+  //check to make sure some .bin files was found
+  if (files.empty())
+   {
+   cout << "Error finding .bin files" << endl;
+   return 1;
+   }
+  if (darkfiles.empty())
+   {
+   cout << "Warning: did not find any dark_*.bin files, proceeding anyways" << endl;
+   }
+  if (logfile.empty())
+   {
+   cout <<" Warning: did not find a log file, proceeding with default values" << endl;
+   }
+  // sort filesnames numerically
+  sort(files.begin(), files.end(),compareFileNamesNumeric);
+    
+  // sort dark filesnames numerically
+  sort(darkfiles.begin(), darkfiles.end(),compareFileNamesNumeric);
+
+  closedir(dp);
+  
+  return 0;
+}

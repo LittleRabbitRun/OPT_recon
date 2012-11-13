@@ -1,0 +1,57 @@
+#include<filehandle.h>
+
+
+class opt_vars {
+
+  float Focus;
+  float Height;
+  long  Zoom;
+  float Averages;
+  float Step ;
+  long ImageSize;
+  float Binning;
+  float Exposure;
+  float Gain;
+  public:
+  opt_vars();
+  ~opt_vars();
+
+  void setFocus(float focus)
+  {Focus = focus;}
+  inline float& getFocus() {return Focus;}
+  
+  void setHeight(float height)
+  {Height = height;}
+  inline float& getHeight() {return Height;}
+  
+  void setZoom(long zoom)
+  {Zoom = zoom;}
+  inline long& getZoom() {return Zoom;}
+  
+  void setAverages(float avg)
+  {Averages = avg;}
+  inline float& getAverages() {return Averages;}
+
+  void setStep(float step)
+  {Step = step;}
+  inline float getStep() {return Step;}
+
+  void setImageSize(long imsize)
+  { ImageSize= imsize;}
+  inline long getImageSize() {return ImageSize;}
+
+  void setBinning(float bin)
+  { Binning= bin;}
+  inline float& getBinning() {return Binning;}
+  
+  void setExposure(float exp)
+  { Exposure = exp;}
+  inline float& getExposure() {return Exposure;}
+
+  void setGain(float gain)
+  {Gain = gain;}
+  inline float& getGain() {return Gain;}
+  
+};
+
+int readOptLogFile(const string & filename, opt_vars &opt);

@@ -1,0 +1,35 @@
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}") # a hack to get to config.h becaus it is included as ../config.h
+
+
+IF(HAVE_SGP)
+  SET(TOOLS_DEPENDECIES ctsim ctsupport ctgraphics)
+ELSE(HAVE_SGP)
+  SET(TOOLS_DEPENDECIES ctsim ctsupport)
+ENDIF(HAVE_SGP)
+
+# hack
+IF(HAVE_READLINE)
+  SET(TOOLS_DEPENDECIES "${TOOLS_DEPENDECIES}" readline)
+ENDIF(HAVE_READLINE)
+
+ADD_EXECUTABLE(ctsimtext 
+ ctsimtext.cpp if1.cpp if2.cpp ifinfo.cpp ifexport.cpp phm2if.cpp phm2pj.cpp 
+ pj2if.cpp pjinfo.cpp pjrec.cpp nographics.cpp phm2helix.cpp pjHinterp.cpp linogram.cpp)
+
+TARGET_LINK_LIBRARIES(ctsimtext ${TOOLS_DEPENDECIES})
+
+INSTALL(TARGETS ctsimtext DESTINATION bin)
+#TODO 
+
+if(USE_LAM)
+  #TODO find out how to compile MPI programs in cmake
+  
+  ADD_EXECUTABLE(ctsimtext_lam 
+    ctsimtext.cpp if1.cpp if2.cpp ifinfo.cpp ifexport.cpp phm2if.cpp phm2pj.cpp 
+    pj2if.cpp pjinfo.cpp pjrec.cpp nographics.cpp mpiworld.cpp phm2helix.cpp pjHinterp.cpp linogram.cpp
+  )
+
+  TARGET_LINK_LIBRARIES(ctsimtext_lam ${TOOLS_DEPENDECIES})
+  
+  INSTALL(TARGETS ctsimtext_lam DESTINATION bin)
+endif(USE_LAM)

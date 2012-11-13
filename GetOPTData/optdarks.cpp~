@@ -1,0 +1,14 @@
+#include <optdarks.h>
+
+opt_darks::opt_darks()
+{
+
+}
+
+opt_darks::~opt_darks()
+{
+}
+
+int averageDarkOptFiles(const string & filename, opt_darks &opt, char * path)
+{
+}

@@ -1,0 +1,43 @@
+#define COMPLEX_AS_COMPLEX  3
+#define COMPLEX_AS_REAL     2
+#define REAL_AS_COMPLEX     1
+#define REAL_AS_REAL        0
+#define FORWARD_FFT         1
+#define INVERSE_FFT        -1
+#define COMPARE_FILTER      0
+#define INVERSE_FILTER      1
+
+#define FLOAT  1
+#define COMPLEX 2
+#define NUMSLICES 1
+#include "math.h"
+#include "complex.h"
+#include "fftw3.h"
+#include  <useMINC2.h>
+
+extern int verbose;
+extern int num_slices;
+
+typedef fftwf_complex fdr_complex;
+fdr_complex trilinear_interpolation(fdr_complex *psfdata,  double x, double y, double z, double x0, double y0, double z0, double xstep, double ystep, double zstep, long psfn3, long psfn2, long psfn1);
+int psf_in_fdr_filter(mihandle_t psffile, mihandle_t fdrfile, 
+                      long n3, long n2, long n1, 
+                      double step3, double step2, double step1,
+                      long psfn3, long psfn2,long psfn1, 
+                      double psfstep3, double psfstep2, double psfstep1, 
+                      double psfstart3, double psfstart2, double psfstart1); 
+
+
+int deconvolution_in_fdr_space_filter(mihandle_t fdrfile, 
+                                      mihandle_t deconvfile,
+                                      long n3, long n2, long n1);
+int rolloff_filter(mihandle_t inputfile, 
+                   double weight, double maxslope,
+                   long n3, long n2, long n1,
+                   double step2, double step1);
+int bandlimit_filter(mihandle_t filein, double bandlimit,
+                     long n3, long n2, long n1,
+                     double step2, double step1);
+int limit_recovery_filter(mihandle_t filein, mihandle_t fileout, double fdrlimit,
+                          long n3, long n2, long n1);
+

@@ -1,0 +1,14 @@
+CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
+PROJECT(OPT_recon) 
+message("${OPT_recon_SOURCE_DIR}")
+#-----------------------------------------------------------------------------
+SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${OPT_recon_SOURCE_DIR}/cmake-modules")
+
+ADD_SUBDIRECTORY(ctsim-5.2.0)
+ADD_SUBDIRECTORY(MINC)
+ADD_SUBDIRECTORY(PSF)
+ADD_SUBDIRECTORY(GetOPTData)
+ADD_SUBDIRECTORY(pyScripts)
+ADD_SUBDIRECTORY(CCD)
+ADD_SUBDIRECTORY(SignalDecay)
+ADD_SUBDIRECTORY(Crop)

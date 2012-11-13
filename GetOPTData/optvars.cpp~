@@ -1,0 +1,54 @@
+#include <optvars.h>
+opt_vars::opt_vars()
+{
+  Focus = 24.0;
+  Height = 4.5;
+  Zoom = 2500;
+  Averages = 1.0;
+  Step = 1.0;
+  ImageSize = 1024;
+  Binning = 1.0;
+  Exposure = 2500;
+  Gain = 1.0;
+}
+opt_vars::~opt_vars()
+{
+}
+int readOptLogFile(const string & filename, opt_vars &opt)
+{
+ FILE * logFile;
+ char   currentLine[150];
+ double  currentValue;
+ 
+ logFile = fopen( filename.c_str(), "r" );
+ while (!feof(logFile))
+ {
+  if( fscanf( logFile, "%s %lf", currentLine, &currentValue ) != 1)
+    {
+     if (!strcmp(currentLine,"Focus:"))
+       opt.setFocus(currentValue);
+     else if (!strcmp(currentLine,"Height:"))
+       opt.setHeight(currentValue);
+     else if (!strcmp(currentLine,"Zoom:"))	      
+       opt.setZoom(currentValue);
+     else if (!strcmp(currentLine,"Averages:"))
+       opt.setAverages(currentValue);
+     else if (!strcmp(currentLine,"Step:"))
+       opt.setStep(currentValue);
+     else if (!strcmp(currentLine,"Size:"))
+       opt.setImageSize((int)currentValue);
+     else if (!strcmp(currentLine,"Binning:"))
+       opt.setBinning(currentValue);
+     else if (!strcmp(currentLine,"Exposure:"))
+       opt.setExposure(currentValue);
+     else if (!strcmp(currentLine,"Gain:"))
+       opt.setGain(currentValue);
+     else
+       {
+	 cout <<"Can not recognize this variable"<< endl; 
+        return 1;
+       }
+    }
+ }
+ return 0;
+}

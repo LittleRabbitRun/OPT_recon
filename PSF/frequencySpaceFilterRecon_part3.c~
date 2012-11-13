@@ -1,0 +1,127 @@
+/*****************************************************************************
+** FILE IDENTIFICATION
+**
+**      Name:         frequencySpaceFilterRecon_part3.c
+**      Purpose:      frequency space filter reconstruction projections
+**      Programmer:   L.B
+**      Date Started: Jul 2012
+**
+**  This is part of the OPT_RECON program
+**  
+**
+**  This program is free software; you can redistribute it and/or modify
+**  it under the terms of the GNU General Public License (version 2) as
+**  published by the Free Software Foundation.
+**
+**  This program is distributed in the hope that it will be useful,
+**  but WITHOUT ANY WARRANTY; without even the implied warranty of
+**  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+**  GNU General Public License for more details.
+******************************************************************************/
+#include "useMINC2.h"
+#include "fdr.h"
+
+
+int main(int argc, char *argv[])
+{
+  char history[STRINGLENGTH*4];
+  long n3, n2, n1;
+  long psfn3, psfn2, psfn1;
+  mihandle_t inputfile1, inputfile2, outputfile;
+  mihandle_t tmpfile1, tmpfile2;
+  mihandle_t tmpfile3, tmpfile4, tmpfile5;
+  double step3, step2, step1;
+  double start3, start2, start1;
+  
+  int result, i;
+  
+  double starts[NDIMS];
+  double separations[NDIMS];
+  history[0]='\0';
+  void usage(void)
+  {
+   fprintf(stderr, "Usage: max_limit_recovery and rolloff_bandlimit file  and projections_fdr_output\n");
+   return 1;
+   }
+ 
+  if (argc < 4)
+   usage();
+   
+  for (i=0;i<argc;i++)
+  {
+   strcat(history, argv[i]);
+   strcat(history," ");
+   }
+  strcat(history,"\n");
+
+  result = open_minc_file_and_read(argv[1], &inputfile1);
+  if(result) { return 1; }
+  result = get_minc_spatial_dimensions_from_handle(inputfile1, &n3, &n2, &n1);
+  if(result) { return 1; }
+  result = get_minc_spatial_separations_from_handle(inputfile1, &step3,&step2,&step1); 
+  if(result) { return 1; }
+  result = get_minc_spatial_starts_from_handle(inputfile1, &start3,&start2,&start1); 
+  if(result) { return 1; }
+
+  starts[0] = start3;
+  starts[1] = start2;
+  starts[2] = start1;
+  separations[0] = step3;
+  separations[1] = step2;
+  separations[2] = step1;
+
+  result = open_minc_file_and_read(argv[2], &inputfile2);
+  if(result) { return 1; }
+
+  
+  result = open_minc_file_and_write(argv[3], &outputfile, n3, n2, n1,  starts, separations,FLOAT);
+  if(result) { return 1; }
+    
+  /** perform a complex multiplication **/
+ 
+  result = open_minc_file_and_write("/tmp/tmp1.mnc", &tmpfile1, n3, n2, n1,  starts, separations,COMPLEX);
+  if(result) { return 1; }
+  result = open_minc_file_and_write("/tmp/tmp2.mnc", &tmpfile2, n3, n2, n1,  starts, separations,COMPLEX);
+  if(result) { return 1; }
+  strcat(history,"complex multiply shifted FFT projectins with roll off and bandlimit by limit recovery\n");
+
+  result = multiply_complex_by_complex(inputfile1, inputfile2, tmpfile1, n3, n2, n1);
+  if(result) { return 1; }
+  /** perform a 3D FFT inverse **/
+  strcat(history,"apply the 3d inverse FFT \n");
+  result = threedifft(tmpfile1, tmpfile2, n3, n2, n1);
+  if(result) { return 1;}
+  /** perform a 3D FFT SHIFT  **/
+  strcat(history,"apply the 3d shift on the inverse FFT \n");
+  result = cfftshift(tmpfile2, tmpfile1, n3, n2, n1);
+  if(result) { return 1; }
+  strcat(history,"calculate the magnitude \n");
+  result = complex_magnitude(tmpfile1, outputfile, n3, n2, n1);
+  if(result) { return 1; }
+ 
+  result = miclose_volume(tmpfile1);
+  if(result) { return 1; }
+  result = remove("/tmp/tmp1.mnc");
+
+  result = miclose_volume(tmpfile2);
+  if(result) { return 1; }
+  result = remove("/tmp/tmp2.mnc");
+
+  result = micopy_attr(inputfile1,"/OPT",outputfile);
+  if(result) {printf("could not copy attributes at path /OPT or does not exist\n");}
+
+  result = miadd_history_attr(outputfile, strlen(history), history);
+  if(result) {printf("could not history to minc header!!!\n");} 
+
+  result = miclose_volume(inputfile1);
+  if(result) { return 1; }
+  result = miclose_volume(inputfile2);
+  if(result) { return 1; }
+
+  result = miclose_volume(outputfile);
+  if(result) { return 1; }
+
+  return 0;
+}
+
+

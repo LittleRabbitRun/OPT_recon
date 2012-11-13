@@ -1,0 +1,32 @@
+#define NDIMS 3
+#define STRINGLENGTH 256
+#define FLOAT  1
+#define COMPLEX 2
+#define UBYTE  100
+#define USHORT 101
+
+#include "math.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include "minc2.h"
+
+int get_minc_data_type(mihandle_t filein, unsigned short *bitstored);
+int get_minc_spatial_dimensions_from_handle(mihandle_t filename, 
+                                            long *nz, long *ny, long *nx);
+int get_minc_spatial_separations_from_handle(mihandle_t filename, 
+                                            double *stepz, double *stepy, 
+                                            double *stepx);
+int get_minc_spatial_starts_from_handle(mihandle_t filename, 
+                                        double *startz, double *starty, 
+                                        double *startx);
+int open_minc_file_and_read(char *filename, mihandle_t *handle);
+int create_OPT_group_in_minc_header(mihandle_t handle);
+int add_attribute_to_minc_header(mihandle_t handle, const char *name, float value);
+
+int open_minc_file_and_write(char *filename, mihandle_t *handle, 
+                             long n3, long n2, long n1, 
+                             double starts[NDIMS], double separations[NDIMS],
+                             int flags);
+
+int get_minc_history( mihandle_t handle, char *history);

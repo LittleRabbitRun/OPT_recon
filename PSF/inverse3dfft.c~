@@ -1,0 +1,38 @@
+#include "useMINC2.h"
+#include "fdr.h"
+
+int main(int argc, char *argv[]) 
+{
+
+ int result;
+ long n3,n2,n1;
+ mihandle_t filein, fileout;
+  
+ if(argc!=3) 
+ {
+  fprintf(stderr, "Usage: input file and an output file!\n");
+  return 1;
+ }
+
+ result = open_minc_file_and_read(argv[1], &filein);
+ if(!result) return 1;
+    
+ // Get dimensions from first file to duplicate for second file
+  
+ result = get_minc_spatial_dimensions_from_handle(filein, &n3, &n2, &n1);
+ if(!result) return 1;
+  
+ // this should also check for clobber
+ result = open_minc_file_and_write(argv[2], &fileout, n3, n2, n1, COMPLEX);
+ if(!result) return 1;
+	
+ result = slicewise_3difft(filein, fileout, 0);
+ 
+ if(!result) return 1;
+    
+ miclose_volume(filein);
+ miclose_volume(fileout);
+ 
+ return 0;
+
+}

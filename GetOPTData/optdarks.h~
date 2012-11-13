@@ -1,0 +1,12 @@
+#include<filehandle.h>
+
+class opt_darks {
+  void *AvgDarkImage;
+  public:
+  opt_darks();
+  ~opt_darks();
+
+  void* getAverageDarkImage()
+   {return AvgDarkImage;}
+};
+ int averageDarkOptFiles(const string & filename, opt_darks &opt);

@@ -1,0 +1,292 @@
+#!/usr/bin/env python
+# L.B Sept 2011
+# modified the original pmincaverage.py (JP Lerch) to use
+# multiprocessing with rows instead of slices (projections), 
+import re
+import os
+from sys import argv
+from pylab import *
+from pyminc.volumes.factory import *
+from numpy import *
+from scipy import interpolate
+from optparse import OptionParser
+import multiprocessing as mp
+from scipy.optimize import leastsq
+import string
+from time import time, ctime
+from OPT_recon.masterConfig import *
+program_name = 'opt_signaldecay.py'
+volhandles = []
+
+def normalizeslices(means, nprojections):
+    factors = zeros( (nprojections) )
+    for m in range(nprojections):
+      factors[m] = means[m]/(sum(means)-means[m])
+    return factors
+def exponential_err_calc(parameters, y, x):
+    '''Takes the tuple of parameters (a,b,c,d) and returns the error between 
+    the data points y and the calculated fit for data points x.'''
+    a,b = parameters
+    return y - a*exp(-b*x)
+ 
+def getslice(volhandle, slice, q,nslices):
+    """collects hyperslabs for a particular volume handle. Designed to
+    be used with the multiprocessing module"""
+    if volhandles[0].ndims == 3: #3D file
+        t = volhandles[volhandle].getHyperslab((slice,0,0),
+                                               (nslices,volhandles[0].sizes[1],
+                                                volhandles[0].sizes[2]))
+        t.shape = (nslices,volhandles[0].sizes[1], volhandles[0].sizes[2])
+    elif volhandles[0].ndims == 4: #4D vector file
+        t = volhandles[volhandle].getHyperslab((0, slice,0,0),
+                                               (volhandles[0].sizes[0],
+                                                nslices,
+                                                volhandles[0].sizes[2],
+                                                volhandles[0].sizes[3]))
+        t.shape = (volhandles[0].sizes[0],
+                   nslices,
+                   volhandles[0].sizes[2],
+                   volhandles[0].sizes[3])
+    q.put((volhandle, t))
+
+def getfile(q, filename):
+    q.put(volumeFromFile(filename, dtype='double'))   
+
+def process_options(infile = None, outfile = None, method = 2,
+                    smooth=5.0,
+                    file = False, showplot = False, testonly =False, path=False):
+   
+    # open all the file handles (read all files), 
+    # note these must be CCD corrected first!
+    #get filename and path separeted 
+    p1 = os.path.dirname(infile)
+    if (testonly):
+      p2=True
+    else:
+      p2 = os.path.dirname(outfile)
+
+    if not p1:
+       path=makeDir(path)
+       infile=path+infile
+    if not p2:
+       path=makeDir(path)
+       outfile=path+outfile
+     
+    nfiles = 1
+    for i in range( nfiles):
+        #print("VOLHANDLES: %d" % i)
+        #print("Processing Projections")
+        volhandles.append(volumeFromFile(infile, dtype='float'))
+
+    # hint: slice is projection for OPT data
+    number_of_slices =  volhandles[0].sizes[0]
+    # create the slice array
+    nslices = 10
+    if volhandles[0].ndims == 3:
+        sliceIndex = 0
+        sliceArray = zeros( (nfiles,nslices,
+                             volhandles[0].sizes[1],
+                             volhandles[0].sizes[2]))
+    elif volhandles[0].ndims == 4:
+        sliceIndex = 1
+        sliceArray = zeros( (nfiles,volhandles[0].sizes[0],
+                             nslices,
+                             volhandles[0].sizes[2],
+                             volhandles[0].sizes[3]))
+
+
+    one_d_data = zeros( (number_of_slices) )
+    difference = zeros( (number_of_slices) )
+    means = zeros( (number_of_slices) )
+    correction_factor = zeros( (number_of_slices) )
+
+    # loop over all rows
+    p = mp.Pool(processes=2)
+    manager = mp.Manager()
+    for i in range(0,volhandles[0].sizes[sliceIndex],nslices):
+        # last set might have less than n-slices - adjust.
+        if (i + nslices) > volhandles[0].sizes[sliceIndex]:
+            nslices = volhandles[0].sizes[sliceIndex] - i
+            if volhandles[0].ndims == 3:
+                sliceArray = zeros( (nfiles,nslices,
+                                     volhandles[0].sizes[1],
+                                     volhandles[0].sizes[2]))
+            elif volhandles[0].ndims == 4:
+                sliceArray = zeros( (nfiles,volhandles[0].sizes[0],
+                                     nslices,
+                                     volhandles[0].sizes[2],
+                                     volhandles[0].sizes[3]))
+                
+        print "Processing 10 Projections starting at: %i" % i
+        # use parallel processing to get the projection data
+        q = manager.Queue()
+        for j in range( nfiles ):
+            t = p.apply_async(getslice, (j,i,q,nslices))
+
+        t.get() # seems to be necessary as a sort of waitpid call ...
+
+        # retrieve the data from the queue
+        while not q.empty():
+            ix, t = q.get()
+            if volhandles[0].ndims == 3:
+                sliceArray[ix,::,::,::] = t
+            elif volhandles[0].ndims == 4:
+                sliceArray[ix,::,::,::,::] = t
+
+
+        # get each slice and create the average
+        for k in range(nslices):
+            if volhandles[0].ndims == 3:
+                sl = sliceArray[::,k,::,::]
+            elif volhandles[0].ndims == 4:
+                for vi in range(volhandles[0].sizes[0]):
+                    sl = sliceArray[::,vi,k,::,::]
+            # tried either "average" or "sum" and they both resulted the same
+            one_d_data[i+k] = average(sl)
+            means[i+k] = mean(sl)
+            #print   means[i+k] 
+    ind = arange( volhandles[0].sizes[0], dtype=float )
+    
+    # calculate smoothing of interpolation as discussed 
+    # with (JG Sled Apr 11/2012)
+    # smoothing = (percent_of_smoothing* initial value)**2 * # of projections
+    #print nprojections
+
+    nprojections = volhandles[0].sizes[0]
+    smoothing= (float(smooth)*(0.01)* one_d_data[0])**2*nprojections/16.0
+    
+    print "Interpolating with smoothing value of ",smoothing
+    #attempting to fit the data into spline (cubic)
+    # Given the set of data points (x[i], y[i]) determine 
+    # a smooth spline approximation of degree k on the interval xb <= x <= xe. 
+    pt = interpolate.splrep(ind, one_d_data, k=3, s=smoothing)
+    # Evaluate a B-spline or its derivatives.
+    s_fit3 = interpolate.splev(ind,pt) 
+    
+    # now try to use the fitted data for exponential 
+    initial_guess = [s_fit3[0], ((s_fit3[0]-s_fit3[-1])/s_fit3[0])/len(s_fit3) ]
+    print "Fitting exponential with an initial guess of", initial_guess
+    plsq, success = leastsq(exponential_err_calc, initial_guess, args=(s_fit3, ind),maxfev=2000)
+    # note : equation as written in document g(t) = A*e^(-Bt)
+    # A = plsq[0] B=plsq[1]	
+    # gt =  plsq[0] *exp(plsq[1]*ind)
+    ft = exp(plsq[1]*ind)
+    
+    for m in range(nprojections):
+      difference[m] =one_d_data[m]-s_fit3[m]*ft[m]/one_d_data[m]
+    standard_dev = std(difference)/one_d_data[0]
+   
+    print 'Estimated parameters: ', plsq
+    print 'Real parameters: ', initial_guess
+    if (file or showplot):
+      # plotting, Save if asked, show if asked
+      plot(ind, one_d_data, 'g', ind, s_fit3,'r',ind, ft, 'c')
+      legend(("OPT data", "spline fitted data", "exponential fit"))
+      if(showplot):
+        show()
+      if(file):
+        savefig(path+file)
+    
+    method = int(method)
+    # create output file
+        
+    if (testonly or method==4):
+      return -1
+    elif (method == 3):
+      correction_factor = normalizeslices(means,nprojections)
+      str1='method 3: correcting with normalization only'
+    elif (method == 1):
+      correction_factor = s_fit3
+      str1='method 1: correcting with spline only'
+    else:
+      if ((standard_dev < 1.0 or standard_dev > 0.1) and plsq[1] > 0 ):
+        str1='method 2: correcting with spline and exponential fit'
+        for m in range(nprojections):
+          correction_factor[m] =ft[m]*s_fit3[m]/one_d_data[m]
+      else:
+          str1='using method 1 instead of 2 correcting with spline only!!!'
+          correction_factor = s_fit3
+   
+    print str1 
+    outfile_h = volumeFromInstance(volhandles[0], outfile, volumeType='float', path='/OPT')
+
+    for m in range(nprojections):
+      outfile_h.data[m,::,::]= volhandles[0].data[m,::,::]*correction_factor[m]
+           
+      # add correction factor to minc history
+      
+    history1= volhandles[0].getHistory()
+    history2= ctime(time()) + string.join(argv)
+    history = history1.value+history2 + " using correction factor with "+str1+'\n';
+
+    outfile_h.addHistory(len(history),history)
+
+    # and Bob's your uncle.
+    outfile_h.writeFile()
+    outfile_h.closeVolume()
+
+    # close the volume 	           
+    volhandles[0].closeVolume()
+
+    return 0       
+ 
+if __name__ == "__main__":
+
+    usage = "Usage: "+program_name+" [options--> pick method(1-4)] input.mnc output.mnc\n"+\
+            "   or  "+program_name+" --help";
+    description = "correcting for photo bleaching and flunctuations in illumination in one step\n"+\
+                  "using one of the following 4 options:                                       \n"+\
+                  "1.  f(t) = spline * x(t)                                                    \n"+\
+                  "2.  f(t) = spline * x(t) , g(t) = A exp(B*t) and finally f(t) * g(t) / x(t) \n"+\
+                  "3.  f(t) = normalize all slices to have same mean intensity                 \n"+\
+                  "4.  f(t) = none of the above, proceed without correction                      "
+                   
+    
+   
+    parser = OptionParser(usage=usage, description=description)
+    parser.add_option("--clobber", action="store_true", dest="clobber",
+                       default=False, help="overwriting output file(s)")
+    parser.add_option("-s","--smooth",dest="smooth",default="5.0",
+                  help="precentage of smoothness of interpolation")
+    parser.add_option("-w","--show",action="store_true",
+                     dest="showplot",default=False,
+                  help="show the plot of data versus the calculated correction")
+    parser.add_option("-f","--file",dest="file",default=False,
+                  help="save the plotted values to a file, specify filename")
+    parser.add_option("-t","--testonly",dest="testonly",default=False,
+                  action="store_true",
+                  help="test by fitting exponential, but do not correct")
+    parser.add_option("-m","--method",dest="method",default="2",
+                  help="correction method to apply to image, refer to description")
+    parser.add_option("-p","--path",action="store", type="string", dest="path",default=False, 
+                  help="create image using the specified path")
+
+    
+    (options, args) = parser.parse_args()
+    if (len(args) == 0):
+	parser.error("Abort! Incorrect number of arguments")
+    
+    if(options.testonly):
+      if(len(args) != 1):
+        parser.error("Incorrect args for test only")
+      else:
+        infile = args[0]
+        outfile = None
+    else:      
+      if(len(args) != 2):
+        parser.error('Incorrect arguments (%d).'% len(args))
+      else:
+        infile, outfile = args
+        if(not os.path.exists(infile)):
+          parser.error( "The infile does not exist", infile)
+
+    if(not options.testonly and os.path.exists(outfile) and not options.clobber):
+      parser.error( "The outfile already exists!" )
+    
+    process_options(infile, outfile , options.method, 
+                    options.smooth, 
+                    options.file, options.showplot, options.testonly, 
+                    options.path)
+    
+                                                          
+    

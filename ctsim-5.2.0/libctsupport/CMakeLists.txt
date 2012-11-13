@@ -1,0 +1,13 @@
+# a hack to get to config.h becaus it is included as ../config.h
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}") 
+
+ADD_LIBRARY(ctsupport SHARED
+ strfuncs.cpp syserror.cpp 
+ fnetorderstream.cpp consoleio.cpp 
+ mathfuncs.cpp xform.cpp 
+ clip.cpp plotfile.cpp 
+ hashtable.cpp interpolator.cpp 
+ globalvars.cpp)
+
+# add the install targets
+INSTALL(TARGETS ctsupport LIBRARY DESTINATION lib PERMISSIONS OWNER_EXECUTE GROUP_EXECUTE WORLD_EXECUTE OWNER_READ GROUP_READ WORLD_READ)

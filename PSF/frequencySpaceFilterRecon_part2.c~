@@ -1,0 +1,176 @@
+/*****************************************************************************
+** FILE IDENTIFICATION
+**
+**      Name:         frequencySpaceFilterRecon_part2.c
+**      Purpose:      frequency space filter reconstruction psf
+**      Programmer:   L.B
+**      Date Started: Jul 2012
+**
+**  This is part of the OPT_RECON program
+**  
+**
+**  This program is free software; you can redistribute it and/or modify
+**  it under the terms of the GNU General Public License (version 2) as
+**  published by the Free Software Foundation.
+**
+**  This program is distributed in the hope that it will be useful,
+**  but WITHOUT ANY WARRANTY; without even the implied warranty of
+**  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+**  GNU General Public License for more details.
+******************************************************************************/
+#include "useMINC2.h"
+#include "fdr.h"
+
+int main(int argc, char *argv[])
+{
+  char history[STRINGLENGTH*4];
+
+  long n3, n2, n1;
+  double step3, step2, step1;
+  double start3, start2, start1;
+
+  long psfn3, psfn2, psfn1;
+  double psfstep3, psfstep2, psfstep1;
+  double psfstart3, psfstart2, psfstart1;
+
+  mihandle_t inputfile, psffile, outputfile;
+  mihandle_t fdrfile, deconvfile, tmpfile1;
+  double fdrlimit=5;
+  double noise_reduction=0.2;
+  double distance_to_psf = 0.01;
+  int result, i;
+  
+  double starts[NDIMS];
+  double separations[NDIMS];
+  history[0]='\0';
+
+  void usage(void)
+  {
+   fprintf(stderr, "Usage: projection file and psf file and projections_fdr_output ...\n");
+   fprintf(stderr, " -n noise_reduction (wiener filter) .. \n");
+   fprintf(stderr, "-r fdrlimit (limit recovery ) -d distance to center of psf!\n");
+   return 1;
+   }
+ 
+  if (argc < 4)
+   usage();
+  for (i=0;i<argc;i++)
+  {
+   strcat(history, argv[i]);
+   strcat(history," ");
+
+   if (argv[i][0] == '-')
+   {
+    switch (argv[i][1])
+    {
+     case 'n':
+       noise_reduction = atof(argv[i+1]);
+       break;
+     case 'r':
+       fdrlimit = atof(argv[i+1]);
+       break;
+     case 'd':
+       distance_to_psf = atof(argv[i+1]);
+       break;
+     default:
+       printf("Wrong Argument: %s\n", argv[i]);
+       usage();
+     }   
+    }
+   }
+  strcat(history,"\n");
+
+  result = open_minc_file_and_read(argv[1], &inputfile);
+  if(result) { return 1; }
+  result = get_minc_spatial_dimensions_from_handle(inputfile, &n3, &n2, &n1);
+  if(result) { return 1; }
+  result = get_minc_spatial_separations_from_handle(inputfile, &step3,&step2,&step1); 
+  if(result) { return 1; }
+  result = get_minc_spatial_starts_from_handle(inputfile, &start3,&start2,&start1); 
+  if(result) { return 1; }
+ 
+  result = open_minc_file_and_read(argv[2], &psffile);
+  if(result) { return 1; }
+  result = get_minc_spatial_dimensions_from_handle(psffile, &psfn3, &psfn2, &psfn1);
+  if(result) { return 1; }
+  result = get_minc_spatial_separations_from_handle(psffile, &psfstep3,&psfstep2,&psfstep1);
+  if(result) { return 1; }
+
+  if (n2 != psfn2 || n1 != psfn1)
+  {
+   printf("Abort: dimensions of projections and psf file do not match!!! \n");
+   return 1;
+  }
+   
+  starts[0] = start3;
+  starts[1] = start2;
+  starts[2] = start1;
+  separations[0] = step3;
+  separations[1] = step2;
+  separations[2] = step1;
+  
+  result = open_minc_file_and_write(argv[3], &outputfile, n3, n2, n1,  starts, separations,COMPLEX);
+  if(result) { return 1; }
+
+  result = open_minc_file_and_write("/tmp/tmp1.mnc", &tmpfile1, psfn3, psfn2, psfn1,  starts, separations,COMPLEX);
+  if(result) { return 1; }
+  result = psfstack_fft(psffile, tmpfile1, psfn3, psfn2, psfn1);
+  if(result) { return 1; }
+  
+  //psfstart3 = (-psfn3/2.0)*psfstep3; changed to the following instead!
+  psfstart3 = -384.71*psfstep3 + distance_to_psf;
+  psfstart2 = -psfn2/2.0;
+  psfstart1 = -psfn1/2.0;
+  result = open_minc_file_and_write("/tmp/fdrfile.mnc", &fdrfile, n3, n2, n1,  starts, separations,COMPLEX);
+  if(result) { return 1; }
+  strcat(history,"psf in fdr filter (psf_in_fdr_filter)\n");
+
+  result = psf_in_fdr_filter(tmpfile1, fdrfile, 
+                             n3, n2, n1, step3, step2, step1,
+                             psfn3, psfn2, psfn1,
+                             psfstep3, psfstep2, psfstep1,
+                             psfstart3, psfstart2, psfstart1);
+  if(result) { return 1; }
+
+  result = miclose_volume(tmpfile1);
+  if(result) { return 1; }
+  result = remove("/tmp/tmp1.mnc");
+
+  result = open_minc_file_and_write("/tmp/deconvfile.mnc", &deconvfile, n3, n2, n1,  starts, separations,COMPLEX);
+  if(result) { return 1; }
+
+  strcat(history,"deconvolution in fdr filter (deconvolution_in_fdr_space_filter)\n");
+
+  result = deconvolution_in_fdr_space_filter(fdrfile, deconvfile, n3, n2, n1, noise_reduction);               
+  if(result) { return 1; }
+
+  result = miclose_volume(fdrfile);
+  if(result) { return 1; }
+  result = remove("/tmp/fdrfile.mnc");
+
+  strcat(history,"limit recovery filter (limit_recovery_filter)\n");
+
+  result = limit_recovery_filter(deconvfile, outputfile, fdrlimit, n3, n2, n1);
+  if(result) { return 1; }
+
+  result = miclose_volume(deconvfile);
+  if(result) { return 1; }
+  result = remove("/tmp/deconvfile.mnc");
+
+  result = micopy_attr(inputfile,"/OPT",outputfile);
+  if(result) {printf("could not copy attributes at path /OPT or does not exist\n");}
+
+  result = miadd_history_attr(outputfile, strlen(history), history);
+  if(result) {printf("could not history to minc header!!!\n");} 
+
+  result = miclose_volume(inputfile);
+  if(result) { return 1; }
+  result = miclose_volume(outputfile);
+  if(result) { return 1; }
+  result = miclose_volume(psffile);
+  if(result) { return 1; }
+
+  return 0;
+}
+
+

@@ -1,0 +1,17 @@
+#include "math.h"
+#include "complex.h"
+#include "fftw3.h"
+#include  <useMINC2.h>
+
+typedef fftwf_complex fdr_complex;
+
+int shift_float_to_complex(long elems, fdr_complex *data);
+int slicewise_rfftshift(mihandle_t filein, mihandle_t fileout);
+int slicewise_cfftshift(mihandle_t filein, mihandle_t fileout);
+int series_1dfft(mihandle_t filein, mihandle_t fileout, int flags);
+int full_2dfft(mihandle_t filein, mihandle_t fileout, int flags);
+int full_2difft(mihandle_t filein, mihandle_t fileout, int flags);
+int full_3dfft(mihandle_t filein, mihandle_t fileout, int flags);
+int full_3difft(mihandle_t filein, mihandle_t fileout, int flags);
+
+
