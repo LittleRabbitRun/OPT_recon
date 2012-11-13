@@ -70,8 +70,9 @@ int main(int argc, char *argv[])
  if(result) { return 1; }
  result = get_minc_spatial_separations_from_handle(inputfile, &step3,&step2,&step1);
  if(result) { return 1; }
- 
- 
+ result = get_minc_spatial_starts_from_handle(inputfile1, &start3,&start2,&start1);
+ if(result) { return 1; }
+
  starts[0] = start3;
  starts[1] = start2;
  starts[2] = start1;
