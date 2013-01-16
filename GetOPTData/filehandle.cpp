@@ -93,7 +93,7 @@ bool compareFileNamesNumeric(const string& s1, const string& s2)
   // otherwise, return false
   return 0;
 }
-bool getFilenameWithoutExtension(string path)
+bool getFilenameWithoutExtension(const string path)
 {
   size_t found;
   found = path.find('.');
@@ -102,24 +102,82 @@ bool getFilenameWithoutExtension(string path)
 
   return 0;
 }
-string ExtractDirectory(string path)
+string ExtractDirectory(const string path)
 {
   return path.substr( 0, path.find_last_of( "/" ) +1);
 }
-string ExtractFileName(string path)
+string ExtractFileName(const string path)
 {
   return path.substr( path.find_last_of( "/" ) +1);
 }
-string getExtension(string path)
+string getExtension(const string path)
 {
   return path.substr(path.find_last_of(".") +1);
 }
-string getPrefix(string path)
+string getPrefix(const string path)
 {
   return path.substr(0,path.find_first_of("_") +1);
 }
-// List files in directory
-int getDir (string dir, vector<string> &files, vector<string> &darkfiles, string &logfile)                                   
+string getSuffix(const string path)
+{
+  return path.substr(path.find_last_of("_") +1);
+}
+
+// list tiff files in directory
+int getDirtiff (string dir, vector<string> &files, string filenameprefix)   
+{
+  DIR *dp;
+  struct dirent *dirp;
+  string path, patname, restoffilename, rest;
+  size_t found;
+  bool miss;
+  if((dp  = opendir(dir.c_str())) == NULL) {
+    cout << "Error accessing directory " << dir << endl;
+    return 1;
+  }
+  patname.assign(filenameprefix);
+  // check to make sure filename satisfy naming convention.
+  // _recdddd.tif or _recdddd.TIF     
+  while ((dirp = readdir(dp)) != NULL) 
+  {
+    path = string(dirp->d_name);
+
+    if(getExtension(path)=="tif" || getExtension(path)=="TIF")
+      {
+       miss = false;
+       if (path.compare(0,patname.length()-1, patname, 0, patname.length()-1) == 0)
+       {
+        //make sure the rest are digits
+        restoffilename = path.substr(patname.length()-1);
+        rest = restoffilename.substr(0,restoffilename.find_last_of("."));
+        for (unsigned int i=0; i < rest.length(); i++)
+        {
+          if (rest[i] < '0'|| rest[i] > '9')
+          {
+           miss = true;
+           break;
+          }
+        }
+       if (!miss)
+       files.push_back(path);
+       }             
+      }
+  }
+    
+  //check to make sure some .tif files was found
+  if (files.empty())
+   {
+   cout << "Error finding .tif files" << endl;
+   return 1;
+   }
+   // sort filesnames numerically
+  sort(files.begin(), files.end(),compareFileNamesNumeric);
+  
+  closedir(dp);
+  return 0;
+}  
+// List bin files in directory
+int getDirbin (string dir, vector<string> &files, vector<string> &darkfiles, string &logfile)                                   
 {
   DIR *dp;
   struct dirent *dirp;
